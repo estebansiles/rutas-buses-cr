@@ -1,0 +1,18 @@
+# Salida generada: se reconstruye con `make build`
+dist/
+
+# Teselas propias: se generan con `make teselas` (archivo grande, no versionar)
+*.pmtiles
+
+# Respaldo del trazado WFS descargado a mano
+*.gml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Sistema
+.DS_Store
+Thumbs.db

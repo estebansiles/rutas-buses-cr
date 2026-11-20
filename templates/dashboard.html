@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Líneas de buses CR · Kilómetros vs tarifa máxima (ARESEP 2026)</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#1d2430;--muted:#6b7280;--line:#e2e6ec;--accent:#1F4E79}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+header{padding:18px 24px 4px}
+h1{font-size:20px;margin:0 0 4px}
+header p{margin:0;color:var(--muted);font-size:13px}
+.wrap{display:grid;grid-template-columns:270px 1fr;gap:16px;padding:16px 24px 32px;align-items:start}
+@media(max-width:920px){.wrap{grid-template-columns:1fr}}
+.card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h2{font-size:14px;margin:0 0 10px;color:var(--accent)}
+aside label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+aside select,aside input{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:#fff;color:var(--ink)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.provbtn{display:inline-block;margin:3px 3px 3px 0;padding:4px 10px;border-radius:14px;border:2px solid;font-size:12px;cursor:pointer;user-select:none;background:#fff}
+.links{font-size:12px;color:var(--muted);margin-top:2px}
+.links a{color:var(--accent)}
+button{padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;font-size:13px}
+button:hover{background:#eef3f8}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.kpi .l{font-size:12px;color:var(--muted)}
+.kpi .v{font-size:20px;font-weight:600;margin-top:2px}
+.kpi .s{font-size:11px;color:var(--muted);margin-top:2px}
+.interp{font-size:12px;color:var(--muted);margin:-4px 0 8px;line-height:1.5}
+#tip{position:absolute;pointer-events:none;background:#fff;border:1px solid #cdd3dc;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:10px 12px;font-size:12px;line-height:1.55;width:330px;display:none;z-index:10}
+#tip b{font-size:13px}
+.bar{display:grid;grid-template-columns:250px 1fr 130px;gap:8px;align-items:center;margin:5px 0;font-size:12px}
+.bar .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .track{background:#eef1f5;border-radius:4px;height:14px;overflow:hidden}
+.bar .fill{height:100%;border-radius:4px}
+.bar .val{text-align:right;color:var(--muted);white-space:nowrap}
+.note{font-size:12px;color:var(--muted);line-height:1.55;margin:16px 0 0}
+@media(max-width:920px){.bar{grid-template-columns:150px 1fr 110px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Líneas de buses de Costa Rica: kilómetros vs tarifa máxima</h1>
+  <p>Fuente: ARESEP · Una fila por Código CTP · Km = ramal más largo · Tarifa = máxima ARESEP (recorrido completo) · <a href="index.html" style="color:#1F4E79">Ver el mapa de rutas</a></p>
+</header>
+<div class="wrap">
+  <aside class="card">
+    <h2>Filtros</h2>
+    <label>Provincia (clic para activar o desactivar)</label>
+    <div id="provs"></div>
+    <div class="links"><a href="#" id="allP">Todas</a> · <a href="#" id="noneP">Ninguna</a></div>
+
+    <label for="kmMin">Rango de km (ramal más largo)</label>
+    <div class="row2">
+      <input type="number" id="kmMin" min="0" step="1" aria-label="Km mínimo">
+      <input type="number" id="kmMax" min="0" step="1" aria-label="Km máximo">
+    </div>
+
+    <label for="pend">Pendiente (relieve)</label>
+    <select id="pend">
+      <option value="todas">Todas</option>
+      <option value="PLANA-ONDULADA">Plana-ondulada</option>
+      <option value="PENDIENTE">Pendiente</option>
+      <option value="ONDULADA-MONTAÑOSA">Ondulada-montañosa</option>
+    </select>
+
+    <label for="tar">Con tarifa</label>
+    <select id="tar">
+      <option value="con">Solo con tarifa</option>
+      <option value="todas">Todas las líneas</option>
+      <option value="sin">Solo sin tarifa</option>
+    </select>
+
+    <p style="margin-top:14px"><button id="reset" type="button">Restablecer filtros</button></p>
+  </aside>
+
+  <main>
+    <section class="kpis" id="kpis"></section>
+
+    <section class="card" id="scatterCard">
+      <h2>Kilómetros vs tarifa máxima</h2>
+      <div class="interp" id="interp"></div>
+      <div id="scatter"></div>
+      <div id="tip"></div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <h2>Top 15 líneas con más kilómetros (según filtros)</h2>
+      <div id="top"></div>
+    </section>
+
+    <p class="note">
+      Km = ramal más largo (Km máx). Tarifa = tarifa máxima ARESEP. Las líneas sin tarifa no aparecen en el gráfico de dispersión ni entran en la regresión.
+      La tendencia es una regresión lineal por mínimos cuadrados sobre las líneas filtradas con tarifa; r, R² y ₡ por km adicional se recalculan con cada filtro.
+      % diferencia = (tarifa − tarifa esperada) / tarifa esperada. ₡/km es el valor de la columna del archivo.
+    </p>
+  </main>
+</div>
+
+<script>
+const DATA = __DATA__;
+const PROVS = ["San José","Alajuela","Cartago","Heredia","Guanacaste","Puntarenas","Limón"];
+const COL = {"San José":"#1F4E79","Alajuela":"#C00000","Cartago":"#7030A0","Heredia":"#ED7D31","Guanacaste":"#FFC000","Puntarenas":"#00B050","Limón":"#00B0F0"};
+const DARK_TEXT = new Set(["Guanacaste","Limón"]);
+const BYID = {};
+DATA.forEach(d => BYID[d.id] = d);
+const MAXKM = Math.max(...DATA.map(d => d.km));
+const defaults = () => ({provs: new Set(PROVS), kmMin: 0, kmMax: Math.ceil(MAXKM), pend: "todas", tar: "con"});
+let state = defaults();
+
+const $ = id => document.getElementById(id);
+const thou = s => s.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+function fDec(n, d = 0) {
+  if (n == null || !isFinite(n)) return "—";
+  const [i, f] = Math.abs(n).toFixed(d).split(".");
+  return (n < 0 ? "−" : "") + thou(i) + (f ? "," + f : "");
+}
+const fInt = n => fDec(n, 0);
+const crc = (n, d = 0) => (n == null || !isFinite(n)) ? "—" : "₡" + fDec(n, d);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function readInputs() {
+  const mn = parseFloat($("kmMin").value), mx = parseFloat($("kmMax").value);
+  state.kmMin = isNaN(mn) ? 0 : mn;
+  state.kmMax = isNaN(mx) ? Infinity : mx;
+  state.pend = $("pend").value;
+  state.tar = $("tar").value;
+}
+
+function getFiltered() {
+  return DATA.filter(d => {
+    if (!state.provs.has(d.prov)) return false;
+    if (d.km < state.kmMin || d.km > state.kmMax) return false;
+    if (state.pend !== "todas" && d.pend !== state.pend) return false;
+    if (state.tar === "con" && d.tar == null) return false;
+    if (state.tar === "sin" && d.tar != null) return false;
+    return true;
+  });
+}
+
+function regress(pts) {
+  const n = pts.length;
+  if (n < 2) return {n, a: NaN, b: NaN, r: NaN, r2: NaN};
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p.km; my += p.tar; }
+  mx /= n; my /= n;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of pts) {
+    const dx = p.km - mx, dy = p.tar - my;
+    sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+  }
+  const b = sxx > 0 ? sxy / sxx : NaN;
+  const a = my - b * mx;
+  const r = (sxx > 0 && syy > 0) ? sxy / Math.sqrt(sxx * syy) : NaN;
+  return {n, a, b, r, r2: r * r};
+}
+
+function renderKpis(nAll, nT, avgTar, avgKml, reg) {
+  const items = [
+    ["Líneas filtradas", fInt(nAll), `con tarifa: ${fInt(nT)}`],
+    ["Tarifa máxima promedio", crc(avgTar), "solo líneas con tarifa"],
+    ["₡/km promedio", crc(avgKml, 1), "media de cada línea"],
+    ["r (Pearson)", fDec(reg.r, 3), "km vs tarifa"],
+    ["R²", fDec(reg.r2, 3), "varianza explicada por km"],
+    ["₡ por km adicional", isFinite(reg.b) ? crc(reg.b, 1) : "—", "pendiente de la tendencia"]
+  ];
+  $("kpis").innerHTML = items.map(([l, v, s]) =>
+    `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+}
+
+function interpText(reg) {
+  if (!isFinite(reg.b)) return "Se necesitan al menos dos líneas con tarifa y distinto kilometraje para calcular la tendencia.";
+  const sign = reg.a < 0 ? " − " : " + ";
+  return `Tendencia lineal (n = ${fInt(reg.n)}): tarifa máxima ≈ ${fDec(reg.b, 1)} × km${sign}${crc(Math.abs(reg.a))}. ` +
+         `Cada km adicional suma en promedio ${crc(reg.b, 1)} a la tarifa.`;
+}
+
+const W = 920, H = 470, M = {l: 80, r: 24, t: 16, b: 56};
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
+function renderScatter(T, reg) {
+  const pw = W - M.l - M.r, ph = H - M.t - M.b;
+  const xDataMax = Math.max(1, ...T.map(d => d.km));
+  const yDataMax = Math.max(1, ...T.map(d => d.tar));
+  const xs = niceStep(xDataMax / 6), ys = niceStep(yDataMax / 6);
+  const xMax = Math.ceil(xDataMax / xs) * xs, yMax = Math.ceil(yDataMax / ys) * ys;
+  const X = v => M.l + (v / xMax) * pw;
+  const Y = v => M.t + ph - (v / yMax) * ph;
+
+  let g = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Dispersión de kilómetros frente a tarifa máxima">`;
+  for (let i = 0; i * ys <= yMax + 1e-9; i++) {
+    const v = i * ys, y = Y(v);
+    g += `<line x1="${M.l}" x2="${W - M.r}" y1="${y}" y2="${y}" stroke="#e9ecf1"/>`;
+    g += `<text x="${M.l - 8}" y="${y + 4}" text-anchor="end" font-size="11" fill="#6b7280">${crc(v)}</text>`;
+  }
+  for (let i = 0; i * xs <= xMax + 1e-9; i++) {
+    const v = i * xs, x = X(v);
+    g += `<line x1="${x}" x2="${x}" y1="${M.t}" y2="${M.t + ph}" stroke="#f3f5f8"/>`;
+    g += `<text x="${x}" y="${M.t + ph + 16}" text-anchor="middle" font-size="11" fill="#6b7280">${fInt(v)}</text>`;
+  }
+  g += `<text x="${M.l + pw / 2}" y="${H - 12}" text-anchor="middle" font-size="12" fill="#374151">Kilómetros (ramal más largo)</text>`;
+  g += `<text transform="translate(18 ${M.t + ph / 2}) rotate(-90)" text-anchor="middle" font-size="12" fill="#374151">Tarifa máxima (₡)</text>`;
+  g += `<clipPath id="plotClip"><rect x="${M.l}" y="${M.t}" width="${pw}" height="${ph}"/></clipPath>`;
+  if (isFinite(reg.b)) {
+    g += `<line x1="${X(0)}" y1="${Y(reg.a)}" x2="${X(xMax)}" y2="${Y(reg.a + reg.b * xMax)}" stroke="#111827" stroke-width="2" stroke-dasharray="6 4" clip-path="url(#plotClip)"/>`;
+    g += `<text x="${W - M.r - 6}" y="${M.t + 16}" text-anchor="end" font-size="12" fill="#111827">r = ${fDec(reg.r, 3)} · R² = ${fDec(reg.r2, 3)} · n = ${fInt(reg.n)}</text>`;
+  }
+  for (const d of T) {
+    g += `<circle class="pt" data-id="${d.id}" cx="${X(d.km)}" cy="${Y(d.tar)}" r="5.5" fill="${COL[d.prov]}" fill-opacity="0.85" stroke="#fff" stroke-width="1"/>`;
+  }
+  g += `</svg>`;
+
+  const host = $("scatter");
+  host.innerHTML = g + (T.length ? "" : `<p class="note">Sin líneas con tarifa para estos filtros.</p>`);
+  host.querySelectorAll("circle.pt").forEach(c => {
+    c.addEventListener("mouseenter", e => showTip(BYID[c.dataset.id], reg, e));
+    c.addEventListener("mousemove", moveTip);
+    c.addEventListener("mouseleave", hideTip);
+  });
+}
+
+function showTip(d, reg, e) {
+  const t = $("tip");
+  const exp = reg.a + reg.b * d.km;
+  const ok = isFinite(exp) && exp > 0;
+  const diff = ok ? (d.tar - exp) / exp * 100 : NaN;
+  t.innerHTML = `<b>${esc(d.origen)} → ${esc(d.destino)}</b>
+    ${d.tramos.length > 2 ? `<div>Ruta completa (${d.tramos.length} tramos): ${d.tramos.map(esc).join(" › ")}</div>` : `<div style="color:#6b7280">${esc(d.ruta)}</div>`}
+    <div style="color:#6b7280">${esc(d.prov)} · Código ${esc(d.code)} · Ramales: ${d.ramales ?? "—"} · Km promedio: ${fDec(d.kmp, 1)}</div>
+    Concesionario: ${esc(d.op)}<br>
+    Tarifa máxima: <b>${crc(d.tar)}</b><br>
+    Km (ramal más largo): ${fDec(d.km, 1)} km<br>
+    Tarifa esperada (tendencia): ${ok ? crc(exp) : "—"}<br>
+    % diferencia vs tendencia: <b>${ok ? (diff >= 0 ? "+" : "") + fDec(diff, 1) + "%" : "—"}</b><br>
+    ₡/km: ${crc(d.kml, 1)}`;
+  t.style.display = "block";
+  moveTip(e);
+}
+
+function moveTip(e) {
+  const card = $("scatterCard"), t = $("tip");
+  const r = card.getBoundingClientRect();
+  let x = e.clientX - r.left + 14;
+  const y = e.clientY - r.top + 14;
+  if (x + t.offsetWidth > r.width - 4) x = e.clientX - r.left - t.offsetWidth - 14;
+  t.style.left = Math.max(4, x) + "px";
+  t.style.top = y + "px";
+}
+function hideTip() { $("tip").style.display = "none"; }
+
+function renderTop(F) {
+  const top = [...F].sort((a, b) => b.km - a.km).slice(0, 15);
+  if (!top.length) {
+    $("top").innerHTML = `<p class="note">Sin líneas con los filtros actuales.</p>`;
+    return;
+  }
+  const max = top[0].km;
+  $("top").innerHTML = top.map(d => `
+    <div class="bar" title="${esc(d.op)}">
+      <div class="name">${esc(d.ruta)}</div>
+      <div class="track"><div class="fill" style="width:${(d.km / max * 100).toFixed(2)}%;background:${COL[d.prov]}"></div></div>
+      <div class="val">${fDec(d.km, 1)} km${d.tar == null ? " · sin tarifa" : ""}</div>
+    </div>`).join("");
+}
+
+function render() {
+  const F = getFiltered();
+  const T = F.filter(d => d.tar != null);
+  const reg = regress(T);
+  const avgTar = T.length ? T.reduce((s, d) => s + d.tar, 0) / T.length : NaN;
+  const avgKml = T.length ? T.reduce((s, d) => s + d.kml, 0) / T.length : NaN;
+  renderKpis(F.length, T.length, avgTar, avgKml, reg);
+  $("interp").textContent = interpText(reg);
+  renderScatter(T, reg);
+  renderTop(F);
+}
+
+function syncProvBtns() {
+  $("provs").querySelectorAll(".provbtn").forEach(b => {
+    const p = b.dataset.p, on = state.provs.has(p), c = COL[p];
+    b.style.background = on ? c : "#fff";
+    b.style.color = on ? (DARK_TEXT.has(p) ? "#1d2430" : "#fff") : c;
+    b.style.borderColor = c;
+    b.style.opacity = on ? 1 : 0.5;
+  });
+}
+
+function init() {
+  $("provs").innerHTML = PROVS.map(p => `<span class="provbtn" data-p="${p}">${p}</span>`).join("");
+  $("provs").querySelectorAll(".provbtn").forEach(b => b.addEventListener("click", () => {
+    const p = b.dataset.p;
+    state.provs.has(p) ? state.provs.delete(p) : state.provs.add(p);
+    syncProvBtns(); render();
+  }));
+  $("allP").addEventListener("click", e => { e.preventDefault(); state.provs = new Set(PROVS); syncProvBtns(); render(); });
+  $("noneP").addEventListener("click", e => { e.preventDefault(); state.provs = new Set(); syncProvBtns(); render(); });
+  ["kmMin", "kmMax"].forEach(id => $(id).addEventListener("input", () => { readInputs(); render(); }));
+  ["pend", "tar"].forEach(id => $(id).addEventListener("change", () => { readInputs(); render(); }));
+  $("reset").addEventListener("click", () => {
+    state = defaults();
+    $("kmMin").value = state.kmMin;
+    $("kmMax").value = state.kmMax;
+    $("pend").value = "todas";
+    $("tar").value = "con";
+    syncProvBtns(); render();
+  });
+  $("kmMin").value = 0;
+  $("kmMax").value = Math.ceil(MAXKM);
+  syncProvBtns();
+  render();
+}
+init();
+</script>
+</body>
+</html>

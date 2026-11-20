@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa de rutas de autobús · Costa Rica (ARESEP 2026)</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.15.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.15.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+<script src="https://unpkg.com/@protomaps/basemaps@5.0.0/dist/basemaps.js"></script>
+<script src="https://unpkg.com/proj4@2.9.2/dist/proj4.js"></script>
+<style>
+:root{--ink:#1d2430;--muted:#6b7280;--line:#e2e6ec;--accent:#1F4E79}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);font-size:13px}
+.app{display:grid;grid-template-columns:320px 1fr;height:100vh}
+aside{overflow-y:auto;padding:14px 16px;border-right:1px solid var(--line);background:#fff}
+h1{font-size:17px;margin:0 0 4px;color:var(--accent)}
+h3{font-size:12px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.muted{color:var(--muted);font-size:12px;line-height:1.5;margin:0}
+#map{height:100vh}
+.status{margin:10px 0;padding:8px 10px;border-radius:6px;background:#eef3f8;font-size:12px;line-height:1.5}
+.status.err{background:#fdecec;color:#8a1c1c}
+#fallback{margin:8px 0;padding:8px 10px;border:1px dashed #cdd3dc;border-radius:6px;font-size:12px;line-height:1.5}
+#fallback[hidden]{display:none}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.kpi .l{font-size:11px;color:var(--muted)}
+.kpi .v{font-size:17px;font-weight:600}
+.provbtn{display:inline-block;margin:3px 3px 3px 0;padding:4px 9px;border-radius:14px;border:2px solid;font-size:12px;cursor:pointer;user-select:none;background:#fff}
+.links{font-size:12px;color:var(--muted)}
+.links a{color:var(--accent)}
+input[type=search],select{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px}
+.legend div{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:12px}
+.sw{width:18px;height:4px;border-radius:2px;display:inline-block}
+.maplibregl-popup-content{font-size:12px;line-height:1.5;min-width:240px}
+@media(max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:auto 60vh}#map{height:60vh}aside{max-height:none;border-right:0}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Rutas de autobús de Costa Rica</h1>
+    <p class="muted">Trazado: ARESEP, capa <b>PR05_Vista_BusRamales</b> (WFS). Tarifa y km por línea: análisis del CSV, unido por <b>Código CTP</b>. Fondo: teselas propias (PMTiles) con datos de OpenStreetMap.</p>
+    <p class="muted" style="margin-top:6px"><a href="dashboard.html" style="color:var(--accent)">Ver el dashboard de tarifas</a></p>
+
+    <div id="status" class="status">Cargando trazado desde ARESEP…</div>
+    <div id="fallback" hidden>
+      Si el navegador no puede descargar el trazado, abre el enlace, guarda la respuesta como archivo .gml y cárgalo aquí:
+      <p style="margin:6px 0"><a id="wfsLink" target="_blank" rel="noopener">Abrir GetFeature del trazado</a></p>
+      <input type="file" id="file" accept=".gml,.xml,text/xml">
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="l">Ramales en el mapa</div><div class="v" id="kRam">—</div></div>
+      <div class="kpi"><div class="l">Líneas CTP unidas al CSV</div><div class="v" id="kJoin">—</div></div>
+      <div class="kpi"><div class="l">Km visibles (KM_ARESEP)</div><div class="v" id="kKm">—</div></div>
+      <div class="kpi"><div class="l">Líneas del CSV sin trazado</div><div class="v" id="kNo">—</div></div>
+    </div>
+
+    <h3>Provincia (clic para activar o desactivar)</h3>
+    <div id="provs"></div>
+    <div class="links"><a href="#" id="allP">Todas</a> · <a href="#" id="noneP">Ninguna</a></div>
+
+    <h3>Buscar</h3>
+    <input type="search" id="q" placeholder="Código, operador, ruta o cantón">
+
+    <h3>Tarifa</h3>
+    <select id="tar">
+      <option value="con">Solo líneas con tarifa</option>
+      <option value="todas">Todas (incluye ramales sin cruce con CSV)</option>
+      <option value="sin">Solo sin tarifa</option>
+    </select>
+
+    <h3>Leyenda</h3>
+    <div class="legend" id="legend"></div>
+  </aside>
+  <div id="map"></div>
+</div>
+
+<script>
+const LINES = __DATA__;
+const PROVS = ["San José","Alajuela","Cartago","Heredia","Guanacaste","Puntarenas","Limón"];
+const COL = {"San José":"#1F4E79","Alajuela":"#C00000","Cartago":"#7030A0","Heredia":"#ED7D31","Guanacaste":"#FFC000","Puntarenas":"#00B050","Limón":"#00B0F0"};
+const DARK_TEXT = new Set(["Guanacaste","Limón"]);
+const NOCSV = "#9ca3af";
+const WFS = "https://mapas.aresep.go.cr/server/services/I_Transporte_Externo_PII/I_Transporte_Externo_PII/MapServer/WFSServer";
+const TYPE = "I_Transporte_Externo_PII_I_Transporte_Externo_PII:PR05_Vista_BusRamales";
+const WFS_URL = `${WFS}?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=${TYPE}&outputFormat=${encodeURIComponent("text/xml; subtype=gml/3.1.1")}`;
+// Teselas propias: archivo cr.pmtiles en la MISMA carpeta que esta página
+const TILES_URL = new URL("cr.pmtiles", location.href).href;
+// CRTM05 / Costa Rica Transverse Mercator (EPSG:5367)
+proj4.defs("EPSG:5367", "+proj=tmerc +lat_0=0 +lon_0=-84 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +units=m +no_defs");
+
+const $ = id => document.getElementById(id);
+const thou = s => s.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+const fDec = (n, d = 0) => (n == null || !isFinite(n)) ? "—" : (n < 0 ? "−" : "") + thou(Math.abs(n).toFixed(d).split(".")[0]) + (d ? "," + Math.abs(n).toFixed(d).split(".")[1] : "");
+const crc = (n, d = 0) => (n == null || !isFinite(n)) ? "—" : "₡" + fDec(n, d);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const parseNum = s => { const v = parseFloat(String(s || "").trim().replace(",", ".")); return isFinite(v) ? v : null; };
+
+// Unión por Código CTP: coincidencia exacta; luego tokens numéricos de códigos múltiples ("44-45-47")
+const BYCODE = new Map();
+LINES.forEach(d => BYCODE.set(d.code, d));
+LINES.forEach(d => {
+  if (d.code.includes("-")) d.code.split("-").map(s => s.trim()).filter(s => /^\d+$/.test(s))
+    .forEach(t => { if (!BYCODE.has(t)) BYCODE.set(t, d); });
+});
+
+const state = {provs: new Set(PROVS), tar: "con", q: ""};
+let items = [];
+let tilesOK = false;
+
+// Protocolo PMTiles para MapLibre
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: {
+    version: 8,
+    glyphs: "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
+    sprite: "https://protomaps.github.io/basemaps-assets/sprites/v4/light",
+    sources: {
+      basemap: {
+        type: "vector",
+        url: "pmtiles://" + TILES_URL,
+        attribution: '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+      },
+      rutas: {type: "geojson", data: {type: "FeatureCollection", features: []}}
+    },
+    layers: [
+      ...basemaps.layers("basemap", basemaps.namedFlavor("light"), {lang: "es"}),
+      {
+        id: "rutas-linea", type: "line", source: "rutas",
+        layout: {"line-cap": "round", "line-join": "round"},
+        paint: {
+          "line-color": ["get", "color"],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 7, 1.5, 11, 3, 15, 6],
+          "line-opacity": 0.9
+        }
+      }
+    ]
+  },
+  center: [-84.1, 9.9],
+  zoom: 7.5
+});
+map.addControl(new maplibregl.NavigationControl({showCompass: false}), "top-right");
+
+const styleReady = new Promise(res => map.once("style.load", res));
+map.on("sourcedata", e => { if (e.sourceId === "basemap" && e.isSourceLoaded) tilesOK = true; });
+map.on("error", e => {
+  if (!tilesOK && e && e.error) {
+    setStatus("No se cargaron las teselas. Revisa que cr.pmtiles esté en la misma carpeta que esta página y que el servidor admita peticiones por rango (HTTP 206).", true);
+  }
+});
+
+const hoverPopup = new maplibregl.Popup({closeButton: false, closeOnClick: false, offset: 10});
+map.on("mousemove", "rutas-linea", e => {
+  map.getCanvas().style.cursor = "pointer";
+  hoverPopup.setLngLat(e.lngLat).setHTML(e.features[0].properties.label).addTo(map);
+});
+map.on("mouseleave", "rutas-linea", () => {
+  map.getCanvas().style.cursor = "";
+  hoverPopup.remove();
+});
+map.on("click", "rutas-linea", e => {
+  new maplibregl.Popup({maxWidth: "340px"}).setLngLat(e.lngLat).setHTML(e.features[0].properties.html).addTo(map);
+});
+
+function setStatus(msg, err = false) {
+  const s = $("status");
+  s.textContent = msg;
+  s.className = "status" + (err ? " err" : "");
+}
+
+// Convierte coordenadas EPSG:5367 a [lat, lng] WGS84
+function toLatLngs(values, dim) {
+  const out = [];
+  for (let i = 0; i + 1 < values.length; i += dim) {
+    let x = values[i], y = values[i + 1];
+    if (x > y) [x, y] = [y, x]; // en CR el norte (~1.100.000) > el este (~500.000): corrige el orden si llega N,E
+    const [lon, lat] = proj4("EPSG:5367", "EPSG:4326", [x, y]);
+    out.push([lat, lon]);
+  }
+  return out;
+}
+
+function parseGML(text) {
+  const xml = new DOMParser().parseFromString(text, "text/xml");
+  if (xml.getElementsByTagName("parsererror").length) throw new Error("XML no válido");
+  if (xml.getElementsByTagNameNS("*", "ServiceExceptionReport").length) throw new Error("el servicio WFS devolvió un error");
+  const feats = [];
+  for (const el of xml.getElementsByTagNameNS("*", "PR05_Vista_BusRamales")) {
+    const props = {};
+    let shape = null;
+    for (const c of el.children) {
+      if (c.localName === "SHAPE") shape = c; else props[c.localName] = c.textContent.trim();
+    }
+    const latlngs = [];
+    if (shape) {
+      for (const p of shape.getElementsByTagNameNS("*", "posList")) {
+        const dim = parseInt(p.getAttribute("srsDimension"), 10) || 2;
+        const seg = toLatLngs(p.textContent.trim().split(/\s+/).map(Number), dim);
+        if (seg.length > 1) latlngs.push(seg);
+      }
+      for (const c of shape.getElementsByTagNameNS("*", "coordinates")) {
+        const v = c.textContent.trim().split(/\s+/).flatMap(p => p.split(",").map(Number));
+        const seg = toLatLngs(v, 2);
+        if (seg.length > 1) latlngs.push(seg);
+      }
+    }
+    if (latlngs.length) feats.push({props, latlngs});
+  }
+  return feats;
+}
+
+function visible(it) {
+  const l = it.line;
+  if (state.tar === "con" && (!l || l.tar == null)) return false;
+  if (state.tar === "sin" && (!l || l.tar != null)) return false;
+  if (!l) {
+    if (!(state.tar === "todas" && state.provs.size === PROVS.length)) return false;
+  } else if (!state.provs.has(l.prov)) return false;
+  if (state.q) {
+    const hay = [it.props.RUTACTP2019, it.props.OPERADOR, it.props.CODCTP2019, it.props.CANTONINICIO, it.props.CANTONFINAL, l && l.op]
+      .filter(Boolean).join(" ").toLowerCase();
+    if (!hay.includes(state.q)) return false;
+  }
+  return true;
+}
+
+function popupHTML(it) {
+  const p = it.props, l = it.line;
+  const lineInfo = l
+    ? `Tarifa máx. (CSV): <b>${l.tar != null ? crc(l.tar) : "sin tarifa"}</b><br>Km máx. (CSV): ${fDec(l.km, 1)} km<br>₡/km: ${l.kml != null ? crc(l.kml, 1) : "—"}`
+    : `<span style="color:#6b7280">Sin línea asociada en el CSV</span>`;
+  return `<b>${esc(p.RUTACTP2019 || "Ruta sin nombre")}</b><br>
+    ${esc(p.CANTONINICIO || "—")} → ${esc(p.CANTONFINAL || "—")}<br>
+    Concesionario: ${esc(l ? l.op : p.OPERADOR || "—")}<br>
+    Código CTP: ${esc(p.CODCTP2019 || "—")}<br>
+    Km (KM_ARESEP): ${esc(p.KM_ARESEP || "—")} · DISTANCIA: ${esc(p.DISTANCIA || "—")}<br>
+    Pendiente: ${esc(p.PENDIENTE || "—")} · Pavimentado: ${esc(p.PAVIMENTADO || "—")}<br>
+    ${lineInfo}`;
+}
+
+function toFeature(it) {
+  return {
+    type: "Feature",
+    properties: {color: it.color, label: it.label, html: it.html},
+    geometry: {type: "MultiLineString", coordinates: it.segs.map(seg => seg.map(([la, ln]) => [ln, la]))}
+  };
+}
+
+function render() {
+  const shown = items.filter(visible);
+  const src = map.getSource("rutas");
+  if (src) src.setData({type: "FeatureCollection", features: shown.map(toFeature)});
+  let km = 0, kmN = 0;
+  shown.forEach(it => { const v = parseNum(it.props.KM_ARESEP); if (v != null) { km += v; kmN++; } });
+  $("kRam").textContent = fDec(shown.length);
+  $("kKm").textContent = kmN ? fDec(km, 1) + " km" : "—";
+}
+
+function build(feats) {
+  const matchedLines = new Set();
+  let matched = 0;
+  items = feats.map(f => {
+    const code = String(f.props.CODCTP2019 || "").trim();
+    const line = BYCODE.get(code) || null;
+    if (line) { matched++; matchedLines.add(line.id); }
+    const it = {
+      props: f.props, line, segs: f.latlngs,
+      color: line ? COL[line.prov] : NOCSV,
+      label: `${esc(f.props.CANTONINICIO || "")} → ${esc(f.props.CANTONFINAL || "")}`
+    };
+    it.html = popupHTML(it);
+    return it;
+  });
+  const sinTrazo = LINES.filter(d => !matchedLines.has(d.id)).length;
+  $("kNo").textContent = fDec(sinTrazo);
+  $("kJoin").textContent = `${fDec(matchedLines.size)} de ${fDec(LINES.length)}`;
+  setStatus(`Trazado cargado: ${fDec(items.length)} ramales (${fDec(matched)} unidos al CSV).`);
+  styleReady.then(() => {
+    render();
+    const b = new maplibregl.LngLatBounds();
+    items.forEach(it => it.segs.forEach(seg => seg.forEach(([la, ln]) => b.extend([ln, la]))));
+    if (!b.isEmpty()) map.fitBounds(b, {padding: 30, duration: 0});
+  });
+}
+
+function buildControls() {
+  $("provs").innerHTML = PROVS.map(p => `<span class="provbtn" data-p="${p}">${p}</span>`).join("");
+  $("provs").querySelectorAll(".provbtn").forEach(b => b.addEventListener("click", () => {
+    const p = b.dataset.p;
+    state.provs.has(p) ? state.provs.delete(p) : state.provs.add(p);
+    syncProv(); render();
+  }));
+  $("allP").addEventListener("click", e => { e.preventDefault(); state.provs = new Set(PROVS); syncProv(); render(); });
+  $("noneP").addEventListener("click", e => { e.preventDefault(); state.provs = new Set(); syncProv(); render(); });
+  $("q").addEventListener("input", e => { state.q = e.target.value.trim().toLowerCase(); render(); });
+  $("tar").addEventListener("change", e => { state.tar = e.target.value; render(); });
+  $("legend").innerHTML = PROVS.map(p => `<div><span class="sw" style="background:${COL[p]}"></span>${p}</div>`).join("") +
+    `<div><span class="sw" style="background:${NOCSV}"></span>Sin línea asociada en el CSV</div>`;
+  $("wfsLink").href = WFS_URL;
+  syncProv();
+}
+
+function syncProv() {
+  $("provs").querySelectorAll(".provbtn").forEach(b => {
+    const p = b.dataset.p, on = state.provs.has(p), c = COL[p];
+    b.style.background = on ? c : "#fff";
+    b.style.color = on ? (DARK_TEXT.has(p) ? "#1d2430" : "#fff") : c;
+    b.style.borderColor = c;
+    b.style.opacity = on ? 1 : 0.5;
+  });
+}
+
+function loadText(text) {
+  try {
+    build(parseGML(text));
+  } catch (e) {
+    setStatus("No se pudo leer el trazado: " + e.message, true);
+    $("fallback").hidden = false;
+  }
+}
+
+async function loadLive() {
+  try {
+    const res = await fetch(WFS_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    loadText(await res.text());
+  } catch (e) {
+    setStatus("El navegador no pudo descargar el trazado directamente (" + e.message + "). Usa el archivo de respaldo.", true);
+    $("fallback").hidden = false;
+  }
+}
+
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  setStatus("Leyendo archivo…");
+  loadText(await f.text());
+});
+
+buildControls();
+loadLive();
+</script>
+</body>
+</html>
